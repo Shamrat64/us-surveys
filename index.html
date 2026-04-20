@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>US Surveys - VPS Manager</title>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+body{background:#f4f6f9;}
+.sidebar{height:100vh;background:#111827;color:white;padding:20px;}
+.sidebar button{width:100%;margin-bottom:10px;}
+</style>
+</head>
+
+<body>
+
+<!-- LOGIN -->
+<div id="loginPage" class="container py-5">
+<div class="row justify-content-center">
+<div class="col-md-4">
+<div class="card p-4 shadow">
+<h4 class="text-center">US Surveys Login</h4>
+<input type="password" id="pass" class="form-control mt-3">
+<button class="btn btn-primary w-100 mt-3" onclick="login()">Login</button>
+</div>
+</div>
+</div>
+</div>
+
+<!-- APP -->
+<div id="appPage" style="display:none;">
+<div class="container-fluid">
+<div class="row">
+
+<div class="col-md-2 sidebar">
+<h4>US Surveys</h4>
+<button class="btn btn-primary btn-sm" onclick="loadPage('dashboard')">Dashboard</button>
+<button class="btn btn-success btn-sm" onclick="loadPage('all')">All</button>
+<button class="btn btn-warning btn-sm" onclick="loadPage('active')">Active</button>
+<button class="btn btn-info btn-sm" onclick="loadPage('warning')">Warning</button>
+<button class="btn btn-danger btn-sm" onclick="loadPage('expired')">Expired</button>
+<hr>
+<button class="btn btn-secondary btn-sm" onclick="backup()">Backup</button>
+<input type="file" class="form-control mt-2" onchange="restore(event)">
+<button class="btn btn-danger btn-sm mt-2" onclick="logout()">Logout</button>
+</div>
+
+<div class="col-md-10 p-4" id="contentArea"></div>
+
+</div>
+</div>
+</div>
+
+<script>
+
+const PASSWORD="admin123";
+
+let clients = JSON.parse(localStorage.getItem("clients")) || [];
+let editIndex = -1;
+let chart = null;
+
+/* LOGIN STATE FIX */
+window.onload = function(){
+let logged = localStorage.getItem("loggedIn");
+
+if(logged === "true"){
+document.getElementById("loginPage").style.display="none";
+document.getElementById("appPage").style.display="block";
+loadPage("dashboard");
+}
+}
+
+/* LOGIN */
+function login(){
+let pass = document.getElementById("pass").value;
+
+if(pass === PASSWORD){
+localStorage.setItem("loggedIn","true");
+document.getElementById("loginPage").style.display="none";
+document.getElementById("appPage").style.display="block";
+loadPage("dashboard");
+}else{
+alert("Wrong Password");
+}
+}
+
+/* LOGOUT */
+function logout(){
+localStorage.removeItem("loggedIn");
+location.reload();
+}
+
+/* SAVE */
+function save(){
+localStorage.setItem("clients", JSON.stringify(clients));
+}
+
+/* STATUS */
+function getStatus(exp){
+let d = (new Date(exp) - new Date())/(1000*60*60*24);
+
+if(d < 0) return "expired";
+if(d <= 2) return "warning";
+return "active";
+}
+
+/* ROUTER */
+function loadPage(page){
+
+if(page === "dashboard"){
+renderDashboard();
+return;
+}
+
+if(page === "all"){
+renderList(clients,false);
+return;
+}
+
+let filtered = clients.filter(c => getStatus(c.exp) === page);
+renderList(filtered,true);
+}
+
+/* DASHBOARD */
+function renderDashboard(){
+
+let a=0,w=0,e=0,inc=0;
+
+clients.forEach(c=>{
+let s=getStatus(c.exp);
+
+if(s==="active") a++;
+if(s==="warning") w++;
+if(s==="expired") e++;
+
+if(c.billStatus==="Paid") inc+=Number(c.bill);
+});
+
+document.getElementById("contentArea").innerHTML=`
+<div class="row g-3">
+<div class="col-md-3"><div class="card p-3 bg-success text-white">Active<h3>${a}</h3></div></div>
+<div class="col-md-3"><div class="card p-3 bg-warning">Warning<h3>${w}</h3></div></div>
+<div class="col-md-3"><div class="card p-3 bg-danger text-white">Expired<h3>${e}</h3></div></div>
+<div class="col-md-3"><div class="card p-3 bg-dark text-white">Income<h3>$${inc}</h3></div></div>
+</div>
+<canvas id="chart" class="mt-4"></canvas>
+`;
+
+if(chart) chart.destroy();
+
+chart = new Chart(document.getElementById("chart"),{
+type:"doughnut",
+data:{
+labels:["Active","Warning","Expired"],
+datasets:[{data:[a,w,e]}]
+}
+});
+}
+
+/* LIST */
+function renderList(list, colored){
+
+let html = "";
+
+/* FORM */
+if(!colored){
+html += `
+<div class="card p-3 mb-3">
+<input id="name" class="form-control mb-2" placeholder="Name">
+<input id="company" class="form-control mb-2" placeholder="Company">
+<input id="ip" class="form-control mb-2" placeholder="IP">
+<input id="mobile" class="form-control mb-2" placeholder="Mobile">
+<input id="bill" class="form-control mb-2" placeholder="Bill">
+<input id="note" class="form-control mb-2" placeholder="Referrer">
+<input type="date" id="reg" class="form-control mb-2">
+<button class="btn btn-primary" onclick="addClient()">Save</button>
+</div>
+`;
+}
+
+/* LIST */
+list.forEach((c,i)=>{
+
+let s=getStatus(c.exp);
+
+let bg="";
+if(colored){
+if(s==="active") bg="bg-success text-white";
+if(s==="warning") bg="bg-warning";
+if(s==="expired") bg="bg-danger text-white";
+}
+
+let payBtn = (s==="warning"||s==="expired")
+? `<button class="btn btn-success btn-sm" onclick="pay(${i})">Pay</button>` : "";
+
+html += `
+<div class="card p-3 mb-2 ${bg}">
+<b>${c.name}</b> (${c.company})<br>
+IP: ${c.ip} | ${c.mobile}<br>
+Note: ${c.note || "-"}<br>
+Expire: ${c.exp} (${s})<br>
+
+${payBtn}
+<button class="btn btn-warning btn-sm" onclick="edit(${i})">Edit</button>
+<button class="btn btn-danger btn-sm" onclick="del(${i})">Delete</button>
+</div>
+`;
+});
+
+document.getElementById("contentArea").innerHTML = html;
+}
+
+/* ADD */
+function addClient(){
+
+let regInput = document.getElementById("reg").value;
+
+if(!regInput){
+alert("Select registration date");
+return;
+}
+
+let regDate = new Date(regInput);
+let expDate = new Date(regDate);
+expDate.setDate(expDate.getDate()+32);
+
+let client = {
+name: document.getElementById("name").value,
+company: document.getElementById("company").value,
+ip: document.getElementById("ip").value,
+mobile: document.getElementById("mobile").value,
+bill: document.getElementById("bill").value,
+billStatus:"Unpaid",
+note: document.getElementById("note").value,
+reg: regInput,
+exp: expDate.toISOString().split('T')[0]
+};
+
+if(editIndex>=0){
+clients[editIndex]=client;
+editIndex=-1;
+}else{
+clients.push(client);
+}
+
+save();
+loadPage("all");
+}
+
+/* PAY */
+function pay(i){
+let d = new Date();
+d.setDate(d.getDate()+32);
+
+clients[i].exp = d.toISOString().split('T')[0];
+clients[i].billStatus = "Paid";
+
+save();
+loadPage("dashboard");
+}
+
+/* EDIT */
+function edit(i){
+let c = clients[i];
+
+document.getElementById("name").value=c.name;
+document.getElementById("company").value=c.company;
+document.getElementById("ip").value=c.ip;
+document.getElementById("mobile").value=c.mobile;
+document.getElementById("bill").value=c.bill;
+document.getElementById("note").value=c.note;
+document.getElementById("reg").value=c.reg;
+
+editIndex=i;
+}
+
+/* DELETE */
+function del(i){
+if(confirm("Delete?")){
+clients.splice(i,1);
+save();
+loadPage("all");
+}
+}
+
+/* BACKUP */
+function backup(){
+let a=document.createElement("a");
+a.href=URL.createObjectURL(new Blob([JSON.stringify(clients)]));
+a.download="backup.json";
+a.click();
+}
+
+/* RESTORE */
+function restore(e){
+let reader=new FileReader();
+reader.onload=function(){
+clients=JSON.parse(reader.result);
+save();
+loadPage("all");
+};
+reader.readAsText(e.target.files[0]);
+}
+
+</script>
+
+</body>
+</html>
